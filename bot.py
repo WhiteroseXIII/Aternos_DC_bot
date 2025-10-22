@@ -59,21 +59,18 @@ async def on_ready():
     print("Aternos Client Initialized.")
 
 # FIX 2 & 3: Correct Aternos login to be fully asynchronous AND use keyword arguments for credentials
+# FINAL FIX: Use the standard Client() constructor (no args) and then call .login()
 async def aternos_login():
     """Logs into Aternos and selects the first server using asyncio.to_thread."""
     global aternos_client, aternos_server
     try:
-        # --- CRITICAL FIX ---
-        # Run the synchronous Client() constructor in a separate thread,
-        # using 'user' and 'password' as keyword arguments to satisfy the API.
-        aternos_client = await asyncio.to_thread(
-            Client, 
-            user=ATERNOS_USER, 
-            password=ATERNOS_PASS
-        )
-        # --------------------
+        # Step 1: Initialize client with no arguments
+        aternos_client = await asyncio.to_thread(Client)
         
-        # Run list_servers() in a separate thread as well
+        # Step 2: Call the separate login method with positional arguments
+        await asyncio.to_thread(aternos_client.login, ATERNOS_USER, ATERNOS_PASS)
+
+        # Step 3: Get servers list
         servers = await asyncio.to_thread(aternos_client.list_servers)
         
         if servers:
@@ -92,7 +89,6 @@ async def aternos_login():
         # Send error to the designated channel on login failure
         if output_channel:
             await output_channel.send(f"FATAL ERROR: Failed to log into Aternos. Check credentials and Aternos status. **Details:** `{e}`")
-
 # --- Discord Commands ---
 
 # Helper function to send messages to the correct channel
