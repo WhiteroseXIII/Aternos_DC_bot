@@ -13,11 +13,14 @@ DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 ATERNOS_USER = os.environ.get("ATERNOS_USER")
 ATERNOS_PASS = os.environ.get("ATERNOS_PASS")
 # NEW: Get the desired output channel ID
-OUTPUT_CHANNEL_ID = os.environ.get("OUTPUT_CHANNEL_ID") # Set this in your .env file!
+OUTPUT_CHANNEL_ID = os.environ.get("OUTPUT_CHANNEL_ID") 
 
 # Set up bot intents and prefix
+# FIX 1: Explicitly declare all required intents
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # Required to read command messages
+intents.members = True          # Required for Server Member Intent (must be enabled in Portal)
+intents.presences = True        # Required for Presence Intent (must be enabled in Portal)
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Aternos Client and Server variables
@@ -55,15 +58,23 @@ async def on_ready():
     await aternos_login()
     print("Aternos Client Initialized.")
 
+# FIX 2: Correct Aternos login to be fully asynchronous
 async def aternos_login():
-    """Logs into Aternos and selects the first server."""
+    """Logs into Aternos and selects the first server using asyncio.to_thread."""
     global aternos_client, aternos_server
     try:
-        aternos_client = Client.from_credentials(ATERNOS_USER, ATERNOS_PASS)
-        servers = aternos_client.list_servers()
+        # Run the synchronous Client.from_credentials in a separate thread
+        aternos_client = await asyncio.to_thread(Client.from_credentials, ATERNOS_USER, ATERNOS_PASS)
+        
+        # Run list_servers() in a separate thread as well
+        servers = await asyncio.to_thread(aternos_client.list_servers)
+        
         if servers:
             aternos_server = servers[0]
             print(f"Selected Aternos Server: {aternos_server.address}")
+            # Success message
+            if output_channel:
+                await output_channel.send(f"Aternos Login successful! Server set to: `{aternos_server.address}`")
         else:
             print("No Aternos servers found!")
             aternos_server = None
@@ -71,22 +82,21 @@ async def aternos_login():
         print(f"Failed to log into Aternos or find server: {e}")
         aternos_client = None
         aternos_server = None
-        # NEW: Send error to the designated channel on login failure
+        # Send error to the designated channel on login failure
         if output_channel:
-             await output_channel.send(f"FATAL ERROR: Failed to log into Aternos. Check credentials. {e}")
+            await output_channel.send(f"FATAL ERROR: Failed to log into Aternos. Check credentials and Aternos status. **Details:** `{e}`")
 
 # --- Discord Commands ---
 
 # Helper function to send messages to the correct channel
-async def send_output(ctx_or_message: str):
-    """Sends the message to the designated output channel, or falls back to ctx if not set."""
+async def send_output(ctx: commands.Context, message: str):
+    """Sends the message to the designated output channel, or falls back to ctx.send()"""
     if output_channel:
-        await output_channel.send(ctx_or_message)
+        await output_channel.send(message)
     else:
-        # If output_channel is not set, we'll try to send the message back to the channel where the command was called.
-        # This function assumes 'ctx' is passed if output_channel is not set, 
-        # but the commands below will need adjustment for this logic.
-        print(f"Could not send to dedicated channel: {ctx_or_message}")
+        # Fallback to sending in the command channel
+        await ctx.send(message)
+
 
 @bot.command(name='startserver', help='Starts the Aternos Minecraft server.')
 async def start_server(ctx):
@@ -99,24 +109,29 @@ async def start_server(ctx):
         return await ctx.send("Aternos server is not configured or failed to log in.")
 
     # Use the designated output channel
-    await send_output(f"Attempting to **START** Aternos server: `{aternos_server.address}`...")
+    await send_output(ctx, f"Attempting to **START** Aternos server: `{aternos_server.address}`...")
 
     try:
-        status = aternos_server.status
+        # Fetch status in a thread
+        status = await asyncio.to_thread(getattr, aternos_server, 'status')
+        
         if status == 'online':
-            return await send_output("Server is already **ONLINE**.")
+            return await send_output(ctx, "Server is already **ONLINE**.")
 
-        await aternos_server.start()
+        # Run start command in a thread
+        await asyncio.to_thread(aternos_server.start)
 
         if status == 'pending':
-            await send_output("Server is in the **STARTING QUEUE**. Awaiting confirmation...")
-            await aternos_server.confirm()
-            await send_output("Start confirmed. Waiting for server to go **ONLINE**.")
+            await send_output(ctx, "Server is in the **STARTING QUEUE**. Awaiting confirmation...")
+            
+            # Run confirm command in a thread
+            await asyncio.to_thread(aternos_server.confirm)
+            await send_output(ctx, "Start confirmed. Waiting for server to go **ONLINE**.")
 
-        await send_output("Start command sent. Use `!status` to track progress.")
+        await send_output(ctx, "Start command sent. Use `!status` to track progress.")
 
     except Exception as e:
-        await send_output(f"Error starting server: {e}")
+        await send_output(ctx, f"Error starting server: {e}")
 
 # IMPORTANT: Repeat the same pattern for check_status and stop_server
 @bot.command(name='status', help='Checks the current status of the Aternos server.')
@@ -128,24 +143,19 @@ async def check_status(ctx):
     if not aternos_server:
         return await ctx.send("Aternos server is not configured or failed to log in.")
     
-    # ... (rest of the logic)
-    # REPLACE all `await ctx.send(message)` with `await send_output(message)`
-    # ...
-    
     try:
-        await aternos_server.fetch()
-        status = aternos_server.status
-        players = aternos_server.players_count
-        max_players = aternos_server.slots
+        # Run fetch and attribute access in threads
+        await asyncio.to_thread(aternos_server.fetch)
+        status = await asyncio.to_thread(getattr, aternos_server, 'status')
+        players = await asyncio.to_thread(getattr, aternos_server, 'players_count')
+        max_players = await asyncio.to_thread(getattr, aternos_server, 'slots')
         
-        # ... (message building logic)
         if status == 'online':
             message = (
                 f"Status: **ONLINE** ✅\n"
                 f"Players: **{players}/{max_players}**\n"
                 f"Address: `{aternos_server.address}`"
             )
-        # ... (rest of status logic)
         elif status == 'offline':
             message = "Status: **OFFLINE** 🛑"
         elif status == 'starting':
@@ -155,12 +165,10 @@ async def check_status(ctx):
         else:
             message = f"Status: **{status.upper()}** (Unknown)"
 
-        # **MODIFIED LINE**
-        await send_output(message) 
+        await send_output(ctx, message) 
         
     except Exception as e:
-        # **MODIFIED LINE**
-        await send_output(f"Error checking status: {e}")
+        await send_output(ctx, f"Error checking status: {e}")
 
 @bot.command(name='stopserver', help='Stops the Aternos Minecraft server.')
 async def stop_server(ctx):
@@ -171,22 +179,21 @@ async def stop_server(ctx):
     if not aternos_server:
         return await ctx.send("Aternos server is not configured or failed to log in.")
 
-    # **MODIFIED LINE**
-    await send_output(f"Attempting to **STOP** Aternos server: `{aternos_server.address}`...")
+    await send_output(ctx, f"Attempting to **STOP** Aternos server: `{aternos_server.address}`...")
 
     try:
-        status = aternos_server.status
+        # Run status check in a thread
+        status = await asyncio.to_thread(getattr, aternos_server, 'status')
+        
         if status == 'offline':
-            # **MODIFIED LINE**
-            return await send_output("Server is already **OFFLINE**.")
+            return await send_output(ctx, "Server is already **OFFLINE**.")
 
-        await aternos_server.stop()
-        # **MODIFIED LINE**
-        await send_output("Stop command sent. Server should be shutting down.")
+        # Run stop command in a thread
+        await asyncio.to_thread(aternos_server.stop)
+        await send_output(ctx, "Stop command sent. Server should be shutting down.")
 
     except Exception as e:
-        # **MODIFIED LINE**
-        await send_output(f"Error stopping server: {e}")
+        await send_output(ctx, f"Error stopping server: {e}")
 
 
 # --- Run Bot ---
