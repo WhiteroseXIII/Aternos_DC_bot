@@ -12,6 +12,8 @@ load_dotenv()
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 ATERNOS_USER = os.environ.get("ATERNOS_USER")
 ATERNOS_PASS = os.environ.get("ATERNOS_PASS")
+# Updated Aternos variables retrieval (add the cookie)
+ATERNOS_SESSION_COOKIE = os.environ.get("ATERNOS_SESSION_COOKIE")
 # NEW: Get the desired output channel ID
 OUTPUT_CHANNEL_ID = os.environ.get("OUTPUT_CHANNEL_ID") 
 
@@ -58,17 +60,21 @@ async def on_ready():
     await aternos_login()
     print("Aternos Client Initialized.")
 
-# FIX 2 & 3: Correct Aternos login to be fully asynchronous AND use keyword arguments for credentials
-# FINAL FIX: Use the standard Client() constructor (no args) and then call .login()
+# FINAL SOLUTION: Use Session Cookie for Cloudflare bypass
 async def aternos_login():
-    """Logs into Aternos and selects the first server using asyncio.to_thread."""
+    """Logs into Aternos using a cookie (if available) or credentials."""
     global aternos_client, aternos_server
     try:
-        # Step 1: Initialize client with no arguments
-        aternos_client = await asyncio.to_thread(Client)
-        
-        # Step 2: Call the separate login method with positional arguments
-        await asyncio.to_thread(aternos_client.login, ATERNOS_USER, ATERNOS_PASS)
+        if ATERNOS_SESSION_COOKIE:
+            print("Attempting login using ATERNOS_SESSION_COOKIE...")
+            # Use the restore_session method (or similar) from the library
+            # This is the standard way to load a session cookie
+            aternos_client = await asyncio.to_thread(Client, session=ATERNOS_SESSION_COOKIE)
+        else:
+            print("Attempting login using username/password...")
+            # Fallback to the working username/password method from last step
+            aternos_client = await asyncio.to_thread(Client)
+            await asyncio.to_thread(aternos_client.login, ATERNOS_USER, ATERNOS_PASS)
 
         # Step 3: Get servers list
         servers = await asyncio.to_thread(aternos_client.list_servers)
@@ -76,19 +82,18 @@ async def aternos_login():
         if servers:
             aternos_server = servers[0]
             print(f"Selected Aternos Server: {aternos_server.address}")
-            # Success message
             if output_channel:
                 await output_channel.send(f"Aternos Login successful! Server set to: `{aternos_server.address}`")
         else:
             print("No Aternos servers found!")
             aternos_server = None
+            
     except Exception as e:
         print(f"Failed to log into Aternos or find server: {e}")
         aternos_client = None
         aternos_server = None
-        # Send error to the designated channel on login failure
         if output_channel:
-            await output_channel.send(f"FATAL ERROR: Failed to log into Aternos. Check credentials and Aternos status. **Details:** `{e}`")
+            await output_channel.send(f"FATAL ERROR: Failed to log into Aternos. Cloudflare/Login failure. **Details:** `{e}`")
 # --- Discord Commands ---
 
 # Helper function to send messages to the correct channel
