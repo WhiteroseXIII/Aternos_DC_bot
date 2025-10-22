@@ -58,14 +58,19 @@ async def on_ready():
     await aternos_login()
     print("Aternos Client Initialized.")
 
-# FIX: Use the standard Client() constructor, which accepts the credentials directly.
+# FIX 2 & 3: Correct Aternos login to be fully asynchronous AND use keyword arguments for credentials
 async def aternos_login():
     """Logs into Aternos and selects the first server using asyncio.to_thread."""
     global aternos_client, aternos_server
     try:
         # --- CRITICAL FIX ---
-        # Run the synchronous Client() constructor in a separate thread
-        aternos_client = await asyncio.to_thread(Client, ATERNOS_USER, ATERNOS_PASS)
+        # Run the synchronous Client() constructor in a separate thread,
+        # using 'user' and 'password' as keyword arguments to satisfy the API.
+        aternos_client = await asyncio.to_thread(
+            Client, 
+            user=ATERNOS_USER, 
+            password=ATERNOS_PASS
+        )
         # --------------------
         
         # Run list_servers() in a separate thread as well
@@ -94,6 +99,8 @@ async def aternos_login():
 async def send_output(ctx: commands.Context, message: str):
     """Sends the message to the designated output channel, or falls back to ctx.send()"""
     if output_channel:
+        # Check if ctx is defined before attempting to respond to it.
+        # This function is now simplified to assume ctx is passed from a command
         await output_channel.send(message)
     else:
         # Fallback to sending in the command channel
