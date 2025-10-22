@@ -58,13 +58,15 @@ async def on_ready():
     await aternos_login()
     print("Aternos Client Initialized.")
 
-# FIX 2: Correct Aternos login to be fully asynchronous
+# FIX: Use the standard Client() constructor, which accepts the credentials directly.
 async def aternos_login():
     """Logs into Aternos and selects the first server using asyncio.to_thread."""
     global aternos_client, aternos_server
     try:
-        # Run the synchronous Client.from_credentials in a separate thread
-        aternos_client = await asyncio.to_thread(Client.from_credentials, ATERNOS_USER, ATERNOS_PASS)
+        # --- CRITICAL FIX ---
+        # Run the synchronous Client() constructor in a separate thread
+        aternos_client = await asyncio.to_thread(Client, ATERNOS_USER, ATERNOS_PASS)
+        # --------------------
         
         # Run list_servers() in a separate thread as well
         servers = await asyncio.to_thread(aternos_client.list_servers)
